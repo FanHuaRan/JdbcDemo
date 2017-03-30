@@ -290,7 +290,10 @@ public class JdbcUtils {
 		releasePrepardStatement(pstmt);
 		releaseResultSet(resultSet);
 	}
-
+   /**
+    * 释放连接
+    * @param connection
+    */
 	private static void releaseConnection(Connection connection) {
 		try {
 			if (connection != null && !connection.isClosed()) {
@@ -300,7 +303,10 @@ public class JdbcUtils {
 			e.printStackTrace();
 		}
 	}
-
+   /**
+    * 释放resultset
+    * @param resultSet
+    */
 	private static void releaseResultSet(ResultSet resultSet) {
 		try {
 			if (resultSet != null && !resultSet.isClosed()) {
@@ -310,7 +316,10 @@ public class JdbcUtils {
 			e.printStackTrace();
 		}
 	}
-
+  /**
+   * 释放PreparedStatement
+   * @param pstmt
+   */
 	private static void releasePrepardStatement(PreparedStatement pstmt) {
 		try {
 			if (pstmt != null && !pstmt.isClosed()) {
@@ -320,7 +329,12 @@ public class JdbcUtils {
 			e.printStackTrace();
 		}
 	}
-	
+	/**
+	 * 根据对象创建insert sql语句
+	 * @param object
+	 * @param fileds
+	 * @return
+	 */
 	private static <T> String createObjectInsertSql(T object, Field[] fileds) {
 		StringBuilder builder = new StringBuilder("insert into  " + object.getClass().getSimpleName() + "(");
 		StringBuilder valueBuilder = new StringBuilder("(");
@@ -338,7 +352,14 @@ public class JdbcUtils {
 		builder.append(valueBuilder);
 		return builder.toString();
 	}
-
+   /**
+    * 获取一行数据 datarow
+    * @param resultSet
+    * @param metaData
+    * @param dataTable
+    * @param cols_len
+    * @throws SQLException
+    */
 	private static void getDataRow(ResultSet resultSet, ResultSetMetaData metaData, DataTable dataTable, int cols_len)
 			throws SQLException {
 		for (int i = 0; i < cols_len; i++) {
@@ -348,7 +369,13 @@ public class JdbcUtils {
 			row.setValue(cols_name, cols_value);
 		}
 	}
-
+	/**
+	 * 获取数据列集合
+	 * @param metaData
+	 * @param dataTable
+	 * @param cols_len
+	 * @throws SQLException
+	 */
 	private static void getColumns(ResultSetMetaData metaData, DataTable dataTable, int cols_len) throws SQLException {
 		for (int j = 0; j < cols_len; j++) {
 			String name = metaData.getColumnName(j + 1);
@@ -358,7 +385,14 @@ public class JdbcUtils {
 			dataTable.addColumn(column);
 		}
 	}
-	
+	/**
+	 * 根据sql和参数数组创建PreparedStatement
+	 * @param sql
+	 * @param params
+	 * @param connection
+	 * @return
+	 * @throws SQLException
+	 */
 	private static PreparedStatement createNormalPreparedStatement(String sql, List<Object> params,
 			Connection connection) throws SQLException {
 		PreparedStatement pstmt = connection.prepareStatement(sql);
@@ -369,7 +403,12 @@ public class JdbcUtils {
 		}
 		return pstmt;
 	}
-
+	/**
+	 * 根据keys创建insert sql语句
+	 * @param tableName
+	 * @param keys
+	 * @return
+	 */
 	private static String createMapInsertSql(String tableName, Object[] keys) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("insert  into " + tableName + " ( ");
@@ -387,7 +426,13 @@ public class JdbcUtils {
 		String sql = builder.toString();
 		return sql;
 	}
-
+	/**
+	 * 根据tablename、主键字段名和keys创建修改 sql
+	 * @param tableName
+	 * @param primaryKey
+	 * @param keys
+	 * @return
+	 */
 	private static String createMapUpdateSql(String tableName, String primaryKey, Object[] keys) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("update  " + tableName + " set ");
@@ -401,14 +446,25 @@ public class JdbcUtils {
 		String sql = builder.toString();
 		return sql;
 	}
-
+	/**
+	 * 创建删除sql
+	 * @param tableName
+	 * @param primaryKey
+	 * @return
+	 */
 	private static String createNormalDeleteSql(String tableName, String primaryKey) {
 		StringBuilder builder = new StringBuilder("delete from " + tableName + " ");
 		builder.append(" where " + primaryKey + "=?");
 		String sql = builder.toString();
 		return sql;
 	}
-
+	/**
+	 * 根据对象创建修改sql
+	 * @param primaryKeyName
+	 * @param cls
+	 * @param fileds
+	 * @return
+	 */
 	private static <T> String createObjectUpdateSql(String primaryKeyName, Class<T> cls, Field[] fileds) {
 		StringBuilder builder = new StringBuilder("update " + cls.getSimpleName() + " set ");
 		for (int i = 0; i < fileds.length; i++) {
@@ -422,21 +478,36 @@ public class JdbcUtils {
 		builder.append(" where " + primaryKeyName + "=?");
 		return builder.toString();
 	}
-
+	/**
+	 * 获取一个map 也就是一行
+	 * @param resultSet
+	 * @param metaData
+	 * @param col_len
+	 * @return
+	 * @throws SQLException
+	 */
 	private static Map<String, Object> getSingleHashMap(ResultSet resultSet, ResultSetMetaData metaData, int col_len)
 			throws SQLException {
 		Map<String, Object> map = new HashMap<>();
 		for (int i = 0; i < col_len; i++) {
 			String cols_name = metaData.getColumnName(i + 1);
 			Object cols_value = resultSet.getObject(cols_name);
-			if (cols_value == null) {
-				cols_value = "";
-			}
 			map.put(cols_name, cols_value);
 		}
 		return map;
 	}
-
+	/**
+	 * 应用反射创建一个对象 一行
+	 * @param cls
+	 * @param resultSet
+	 * @param metaData
+	 * @param cols_len
+	 * @return
+	 * @throws InstantiationException
+	 * @throws IllegalAccessException
+	 * @throws SQLException
+	 * @throws NoSuchFieldException
+	 */
 	private static <T> T getSingleObject(Class<T> cls, ResultSet resultSet, ResultSetMetaData metaData, int cols_len)
 			throws InstantiationException, IllegalAccessException, SQLException, NoSuchFieldException {
 		T resultObject = cls.newInstance();
