@@ -8,7 +8,7 @@ import java.util.Vector;
 /**
  * 连接池实现 线程安全 只是学习 
  * @author fhr
- *
+ * @date 2017/03/06
  */
 public class JdbcConnectionPool implements IConnectionPool {
 	// 初始化池大小，即一开始池中就会有10个连接对象

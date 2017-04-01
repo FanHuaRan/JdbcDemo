@@ -10,7 +10,7 @@ import javax.sql.DataSource;
 /**
  * 重新包装DataSource接口 毕竟我们是要做个简易版的
  * @author FHR
- *
+ * @date 2017/03/06
  */
 public interface IConnectionPool extends DataSource {
 	/**

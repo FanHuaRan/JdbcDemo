@@ -1,7 +1,5 @@
 package pers.fhr.jdbcutil.test;
 
-import static org.junit.Assert.*;
-
 import java.sql.SQLException;
 import java.util.ArrayList;
 
@@ -11,7 +9,7 @@ import org.junit.Test;
 
 import pers.fhr.jdbcutil.util.JdbcUtils;
 
-public class TestJdbc {
+public class JdbcUtilTestCase {
 
 	@BeforeClass
 	public static void setUpBeforeClass() throws Exception {

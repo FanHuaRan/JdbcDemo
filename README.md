@@ -1,9 +1,10 @@
 ## JdbcDemo ##
 
-**jdbcdemo** is a simple java project . it contains jdbcutil what can update、search、insert、delete ... and even to study the connectionpool
-
+**jdbcdemo** is a simple java project . it contains jdbcutil what can **update、search、insert、delete** ... and even to study the **connectionpool**、and **call Procedure**...
 ### tools ###
+
 * eclipse mars2
+* 
 * jdbc connector for mysql.jar
 
 ### licence ###

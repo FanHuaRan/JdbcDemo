@@ -17,8 +17,8 @@ import pers.fhr.jdbcutil.model.DataRow;
 import pers.fhr.jdbcutil.model.DataTable;
 /**
  * 方法较多 很多地方可以考虑使用模板方法进行优化扩展
- * @author FHR
- * @date 2017/3/5
+ * @author fhr
+ * @date 2017/03/05
  */
 public class JdbcUtils {
 	/// 数据库用户名

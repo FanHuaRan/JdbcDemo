@@ -7,7 +7,7 @@ import java.sql.Connection;
  * 没有按照经典模式而实现connection接口
  * 只含有connection引用
  * @author fhr
- *
+ * @date 2017/03/06
  */
 public class ConnectionProxy  {
 	/**
