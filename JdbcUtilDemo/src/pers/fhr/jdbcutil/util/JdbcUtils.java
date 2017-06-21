@@ -22,6 +22,9 @@ import pers.fhr.jdbcutil.model.DataTable;
 /**
  * jdbc封装，
  * 对资源的释放大量采用try_with-resources,少部分采用finally，不统一是个代码坏味，暂时不改了
+ * 还没写多：
+ * 1.数据集的封装方法
+ * 2.同时支持返回和不返回的方法
  * @author fhr
  * @date 2017/03/05
  */
