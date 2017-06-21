@@ -13,13 +13,23 @@ import java.util.Map;
  * 存储过程调用封装
  * 关系数据库通用
  * SQLSERVER支持多数据集返回
- * MySQL多数据集返回
  * ORACLE单数据集
+ * 拓展：可以考虑使用另外一篇日志中的DataSet来封装最终的结果
  * @author fhr
  * @date 2017/03/24
  */
 public class CallProcedureUtil {
 
+	/**
+	 * 没有任何参数的存储过程调用
+	 * @param connection
+	 * @param procedureName
+	 * @throws SQLException
+	 */
+	public void callProcedureNoAnyParams(Connection connection, String procedureName) throws SQLException {
+		 callProcedure(connection, procedureName, null, null,null);
+	}
+	
 	/**
 	 * 只含有返回值的存储过程调用
 	 * @param connection
@@ -43,6 +53,7 @@ public class CallProcedureUtil {
 			throws SQLException {
 		 callProcedure(connection, procedureName, inputParams, null,returnParam);
 	}
+	
 	/**
 	 * 含有返回值和输出参数的存储过程调用
 	 * 不含输入参数和结果集
@@ -55,6 +66,19 @@ public class CallProcedureUtil {
 	public void callProcedureNoInputParams(Connection connection, String procedureName,
 			List<OutPutParam> outPutParams,OutPutParam returnParam) throws SQLException {
 		 callProcedure(connection, procedureName, null, outPutParams,returnParam);
+	}
+	
+	/**
+	 * 只含有结果集的存储过程调用
+	 * @param connection
+	 * @param procedureName
+	 * @param returnParam
+	 * @return
+	 * @throws SQLException
+	 */
+	public List<List<Map<String, Object>>> callProcedureQueryNoAnyParams(Connection connection, String procedureName)
+			throws SQLException {
+		return callProcedureQuery(connection, procedureName, null, null,null);
 	}
 	/**
 	 * 含有返回参数和结果集的存储过程调用
@@ -105,36 +129,35 @@ public class CallProcedureUtil {
 	 */
 	public void callProcedure(Connection connection, String procedureName, List<Object> inputParams,
 			List<OutPutParam> outPutParams,OutPutParam returnParam) throws SQLException {
-		//判断是否需要返回值
+		// 判断是否需要返回值
 		boolean isReturn = returnParam == null ? false : true;
-		//创建调用sql
+		// 创建调用sql
 		String sql = createCallProcedureSQL(procedureName, inputParams, outPutParams, isReturn);
-		//获取调用对象
-		CallableStatement callableStatement = connection.prepareCall(sql);
-		//设置或者注册相关参数 返回输出参数起始索引
-		int outPutStartIndex = 0;
-		if (isReturn) {
-			outPutStartIndex = prepareInputParamsAndOutPutAndReturnParams(inputParams, outPutParams, callableStatement,
-					returnParam);
-		} else {
-			outPutStartIndex = prepareInputParamsAndOutPutParams(inputParams, outPutParams, callableStatement);
-		}
-		//执行调用
-		callableStatement.execute();
-		//获取返回值
-		if (isReturn) {
-			returnParam.setValue(callableStatement.getObject(1));
-		}
-		//获取输出参数
-		if (outPutParams != null) {
-			for (int i = 0; i < outPutParams.size(); i++) {
-				OutPutParam outPutParam = outPutParams.get(i);
-				outPutParam.setValue(callableStatement.getObject(outPutStartIndex + i + 1));
+		// 获取调用对象
+		try (CallableStatement callableStatement = connection.prepareCall(sql)) {
+			// 设置或者注册相关参数 返回输出参数起始索引
+			int outPutStartIndex = 0;
+			if (isReturn) {
+				outPutStartIndex = prepareInputAndOutPutAndReturnParams(inputParams, outPutParams,
+						callableStatement, returnParam);
+			} else {
+				outPutStartIndex = prepareInputAndOutPutParams(inputParams, outPutParams, callableStatement);
+			}
+			// 执行调用
+			callableStatement.execute();
+			// 获取返回值
+			if (isReturn) {
+				returnParam.setValue(callableStatement.getObject(1));
+			}
+			// 获取输出参数
+			if (outPutParams != null) {
+				for (int i = 0; i < outPutParams.size(); i++) {
+					OutPutParam outPutParam = outPutParams.get(i);
+					outPutParam.setValue(callableStatement.getObject(outPutStartIndex + i + 1));
+				}
 			}
 		}
-		//关闭对象 
-		callableStatement.close();
-		//connection交给外部关闭
+		// connection交给外部关闭
 	}
 	/**
 	 * 带返回参数、输入输出参数、结果集的存储过程调用
@@ -154,14 +177,14 @@ public class CallProcedureUtil {
 		// 创建调用sql
 		String sql = createCallProcedureSQL(procedureName, inputParams, outPutParams, isReturn);
 		// 获取调用对象
-		CallableStatement callableStatement = connection.prepareCall(sql);
+		try(CallableStatement callableStatement = connection.prepareCall(sql)){
 		// 设置或者注册相关参数 返回输出参数起始索引
 		int outPutStartIndex = 0;
 		if (isReturn) {
-			outPutStartIndex = prepareInputParamsAndOutPutAndReturnParams(inputParams, outPutParams, callableStatement,
+			outPutStartIndex = prepareInputAndOutPutAndReturnParams(inputParams, outPutParams, callableStatement,
 					returnParam);
 		} else {
-			outPutStartIndex = prepareInputParamsAndOutPutParams(inputParams, outPutParams, callableStatement);
+			outPutStartIndex = prepareInputAndOutPutParams(inputParams, outPutParams, callableStatement);
 		}
 		// 执行查询且封装
 		List<List<Map<String, Object>>> resultLists = getProcdureResults(callableStatement);
@@ -177,6 +200,7 @@ public class CallProcedureUtil {
 			}
 		}
 		return resultLists;
+		}
 	}
 	/**
 	 * 从CallableStatement中获取存储的多个数据集
@@ -186,15 +210,15 @@ public class CallProcedureUtil {
 	 */
 	private List<List<Map<String, Object>>> getProcdureResults(CallableStatement callableStatement)
 			throws SQLException {
-		List<List<Map<String, Object>>> resultLists=new ArrayList<>();
-		ResultSet resultSet =callableStatement.executeQuery();
-		List<Map<String, Object>> list = getListFromResultSet(resultSet);
-		resultSet.close();
-		resultLists.add(list);
+		List<List<Map<String, Object>>> resultLists = new ArrayList<>();
+		try (ResultSet resultSet = callableStatement.executeQuery()) {
+			List<Map<String, Object>> list = getListFromResultSet(resultSet);
+			resultLists.add(list);
+		}
 		while (callableStatement.getMoreResults()) {
-			ResultSet moreResultSet=callableStatement.getResultSet();
-			resultLists.add(getListFromResultSet(moreResultSet));
-			moreResultSet.close();
+			try (ResultSet moreResultSet = callableStatement.getResultSet()) {
+				resultLists.add(getListFromResultSet(moreResultSet));
+			}
 		}
 		return resultLists;
 	}
@@ -234,10 +258,15 @@ public class CallProcedureUtil {
 		}
 		String sql = null;
 		if (isReturn) {
-			sql = String.format("{?=call %s(%s)}", procedureName, stringBuilder.toString());
+			sql = String.format("{ ?=call %s(%s)}", procedureName, stringBuilder.toString());
 		} else {
 			sql = String.format("{call %s(%s)}", procedureName, stringBuilder.toString());
 		}
+//		if (isReturn) {
+//			sql = String.format("SET NOCOUNT ON ?=exec %s %s", procedureName, stringBuilder.toString());
+//		} else {
+//			sql = String.format("SET NOCOUNT ON exec %s %s", procedureName, stringBuilder.toString());
+//		}
 		return sql;
 	}
     /**
@@ -249,7 +278,7 @@ public class CallProcedureUtil {
      * @return
      * @throws SQLException
      */
-	private int prepareInputParamsAndOutPutAndReturnParams(List<Object> inputParams, List<OutPutParam> outPutParams,
+	private int prepareInputAndOutPutAndReturnParams(List<Object> inputParams, List<OutPutParam> outPutParams,
 			CallableStatement callableStatement,OutPutParam returnParam) throws SQLException {
 		callableStatement.registerOutParameter(1, returnParam.getSqlType());
 		if (inputParams != null) {
@@ -274,9 +303,8 @@ public class CallProcedureUtil {
      * @return
      * @throws SQLException
      */
-	private int prepareInputParamsAndOutPutParams(List<Object> inputParams, List<OutPutParam> outPutParams,
+	private int prepareInputAndOutPutParams(List<Object> inputParams, List<OutPutParam> outPutParams,
 			CallableStatement callableStatement) throws SQLException {
-		{
 			if (inputParams != null) {
 				for (int i = 0; i < inputParams.size(); i++) {
 					callableStatement.setObject(i + 1, inputParams.get(i));
@@ -289,7 +317,6 @@ public class CallProcedureUtil {
 				}
 			}
 			return startIndex;
-		}
 	}
 	/**
 	 * 从查询结果获取单个map 也就是一行

@@ -2,21 +2,26 @@ package pers.fhr.jdbcutil.util;
 
 import java.lang.reflect.Field;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import pers.fhr.jdbcutil.model.DataColumn;
 import pers.fhr.jdbcutil.model.DataRow;
 import pers.fhr.jdbcutil.model.DataTable;
 /**
- * 方法较多 很多地方可以考虑使用模板方法进行优化扩展
+ * jdbc封装，
+ * 对资源的释放大量采用try_with-resources,少部分采用finally，不统一是个代码坏味，暂时不改了
  * @author fhr
  * @date 2017/03/05
  */
@@ -40,19 +45,12 @@ public class JdbcUtils {
 		}
 	}
 	/**
-	 * 更新数据库记录
-	 * @param sql
-	 * @param params
+	 * 获取连接对象
 	 * @return
-	 * @throws SQLException
+	 * @throws SQLException 
 	 */
-	public static boolean updateByPreparedStatement(String sql, List<Object> params) throws SQLException {
-		Connection connection = getConnection();
-		PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
-		int result = pstmt.executeUpdate();
-		releaseResources(connection, null, pstmt);
-		boolean flag = result > 0 ? true : false;
-		return flag;
+	public static Connection getConnection() throws SQLException {
+		return DriverManager.getConnection(URL, USERNAME, PASSWORD);
 	}
 	/**
 	 * 查找单个记录
@@ -62,17 +60,18 @@ public class JdbcUtils {
 	 * @throws SQLException
 	 */
 	public static Map<String, Object> findSingleResultByMap(String sql, List<Object> params) throws SQLException {
-		Connection connection = getConnection();
-		PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
-		ResultSet resultSet = pstmt.executeQuery();
-		Map<String, Object> map = null;
-		ResultSetMetaData metaData = resultSet.getMetaData();
-		int col_len = metaData.getColumnCount();
-		while (resultSet.next()) {
-			map = getSingleHashMap(resultSet, metaData, col_len);
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
+				ResultSet resultSet = pstmt.executeQuery()) {
+			Map<String, Object> map = null;
+			ResultSetMetaData metaData = resultSet.getMetaData();
+			int col_len = metaData.getColumnCount();
+			while (resultSet.next()) {
+				map = getSingleHashMap(resultSet, metaData, col_len);
+				break;
+			}
+			return map;
 		}
-		releaseResources(connection, resultSet, pstmt);
-		return map;
 	}
 	/**
 	 * 查找多个记录
@@ -82,77 +81,133 @@ public class JdbcUtils {
 	 * @throws SQLException
 	 */
 	public static List<Map<String, Object>> findMoreResultByMap(String sql, List<Object> params) throws SQLException {
-		Connection connection = getConnection();
-		PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
-		ResultSet resultSet = pstmt.executeQuery();
-		ResultSetMetaData metaData = resultSet.getMetaData();
-		int cols_len = metaData.getColumnCount();
-		List<Map<String, Object>> list = new ArrayList<>();
-		while (resultSet.next()) {
-			list.add(getSingleHashMap(resultSet, metaData, cols_len));
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
+				ResultSet resultSet = pstmt.executeQuery()) {
+			ResultSetMetaData metaData = resultSet.getMetaData();
+			int cols_len = metaData.getColumnCount();
+			List<Map<String, Object>> list = new ArrayList<>();
+			while (resultSet.next()) {
+				list.add(getSingleHashMap(resultSet, metaData, cols_len));
+			}
+			return list;
 		}
-		releaseResources(connection, resultSet, pstmt);
-		return list;
 	}
 	/**
-	 * 更新记录
+	 * 通过map插入或者更新记录 主键存在则更新记录，否则插入记录返回自增主键
 	 * @param tableName
-	 * @param rowValues
-	 * @param primaryKey
+	 * @param fields
+	 * @param pkName
+	 * @param id
+	 * @return 返回主键
+	 * @throws SQLException
+	 */
+	public static Object insertOrUpdateRecordByMap(String tableName,Map<String,Object> fields,String pkName,Object id) throws SQLException{
+		//id不为null且通过id查询记录存在则更新记录
+		if(id!=null&&recordExist(tableName, pkName, id)){
+			updateRecordByMap(tableName, fields, pkName, id);
+			return id;
+		}else{//插入记录
+			return insertRecordByMap(tableName, fields);
+		}
+	}
+	
+	/**
+	 * 通过map和主键修改单个记录 返回是否成功标识
+	 * @param tableName
+	 * @param fields
+	 * @param pkName
 	 * @param id
 	 * @return
 	 * @throws SQLException
 	 */
-	public static boolean updateRecordByMap(String tableName, Map<String, Object> rowValues, String primaryKey, int id)
+	public static boolean updateRecordByMap(String tableName, Map<String, Object> fields, String pkName, Object id)
 			throws SQLException {
-		Object[] keys = rowValues.keySet().toArray();
-		String sql = createMapUpdateSql(tableName, primaryKey, keys);
-		Connection connection = getConnection();
-		PreparedStatement pstmt = connection.prepareStatement(sql);
-		for (int i = 0; i < keys.length; i++) {
-			pstmt.setObject(i++, rowValues.get(keys[i]));
+		// 字段名集合
+		Set<String> filedNames = fields.keySet();
+		// 更新记录的sql语句
+		String sql = createUpdateSqlByMap(tableName, pkName, filedNames);
+		try (Connection connection = getConnection(); PreparedStatement pstmt = connection.prepareStatement(sql)) {
+			// 设置参数
+			int index = 1;
+			for (String fieldName : filedNames) {
+				pstmt.setObject(index++, fields.get(fieldName));
+			}
+			pstmt.setObject(index, id);
+			int resultCount = pstmt.executeUpdate();
+			// 受影响行数>0返回true
+			return resultCount > 0 ? true : false;
 		}
-		pstmt.setObject(keys.length + 1, id);
-		int resultCount = pstmt.executeUpdate();
-		releaseResources(connection, null, pstmt);
-		return resultCount > 0 ? true : false;
 	}
 
 	/**
-	 * 插入记录
+	 * 通过map插入记录 返回主键
 	 * @param tableName
 	 * @param rowValues
 	 * @return
 	 * @throws SQLException
 	 */
-	public static boolean insertRecordByMap(String tableName, Map<String, Object> rowValues) throws SQLException {
-		Object[] keys = rowValues.keySet().toArray();
-		String sql = createMapInsertSql(tableName, keys);
-		Connection connection = getConnection();
-		PreparedStatement pstmt = connection.prepareStatement(sql);
-		for (int i = 0; i < rowValues.size(); i++) {
-			pstmt.setObject(i + 1, rowValues.get(keys[i]));
+	public static Object insertRecordByMap(String tableName, Map<String, Object> fields) throws SQLException {
+		// 字段名集合
+		Set<String> filedNames = fields.keySet();
+		// 插入记录的sql语句
+		String sql = createInsertSqlByMap(tableName, filedNames);
+		ResultSet resultSet = null;
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);) {
+			// 设置参数
+			int index = 1;
+			for (String fieldName : filedNames) {
+				pstmt.setObject(index++, fields.get(fieldName));
+			}
+			pstmt.execute();
+			// 获取主键
+			resultSet = pstmt.getGeneratedKeys();
+			Object key = null;
+			if (resultSet.next()) {
+				key = resultSet.getObject(1);
+			}
+			return key;
+		} finally {
+			releaseResultSet(resultSet);
 		}
-		int resultCount = pstmt.executeUpdate();
-		releaseResources(connection, null, pstmt);
-		return resultCount > 0 ? true : false;
+	}
+	/**
+	 * 检查主键是否存在
+	 * @param connection
+	 * @param tableName
+	 * @param pkName
+	 * @param id
+	 * @return 
+	 * @throws SQLException
+	 */
+	public static boolean recordExist(String tableName,String pkName,Object id) throws SQLException{
+		ResultSet resultSet = null;
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = connection
+						.prepareStatement(String.format("select %s from %s where %s =? ", pkName, tableName, pkName))) {
+			pstmt.setObject(1, id);
+			resultSet = pstmt.executeQuery();
+			return resultSet.next();
+		} finally {
+			releaseResultSet(resultSet);
+		}
 	}
 	/**
 	 * 删除记录
 	 * @param tableName
-	 * @param primaryKey
+	 * @param pkName
 	 * @param id
 	 * @return
 	 * @throws SQLException
 	 */
-	public static boolean deleteRecord(String tableName, String primaryKey, int id) throws SQLException {
-		Connection connection = getConnection();
-		String sql = createNormalDeleteSql(tableName, primaryKey);
-		PreparedStatement pstmt = connection.prepareStatement(sql);
-		pstmt.setObject(1, id);
-		int resultCount = pstmt.executeUpdate();
-		releaseResources(connection, null, pstmt);
-		return resultCount > 0 ? true : false;
+	public static boolean deleteRecord(String tableName, String pkName, int id) throws SQLException {
+		String sql = createNormalDeleteSql(tableName, pkName);
+		try (Connection connection = getConnection(); PreparedStatement pstmt = connection.prepareStatement(sql)) {
+			pstmt.setObject(1, id);
+			int resultCount = pstmt.executeUpdate();
+			return resultCount > 0 ? true : false;
+		}
 	}
 	/**
 	 * 通过反射查找单个记录
@@ -163,18 +218,21 @@ public class JdbcUtils {
 	 * @throws Exception
 	 */
 	public static <T> T findSingleResultByObject(String sql, List<Object> params, Class<T> cls) throws Exception {
-		Connection connection = getConnection();
-		PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
-		ResultSet resultSet = pstmt.executeQuery();
-		resultSet = pstmt.executeQuery();
-		T resultObject = null;
-		ResultSetMetaData metaData = resultSet.getMetaData();
-		int cols_len = metaData.getColumnCount();
-		while (resultSet.next()) {
-			resultObject = getSingleObject(cls, resultSet, metaData, cols_len);
+		ResultSet resultSet = null;
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection)) {
+			resultSet = pstmt.executeQuery();
+			T resultObject = null;
+			ResultSetMetaData metaData = resultSet.getMetaData();
+			int cols_len = metaData.getColumnCount();
+			while (resultSet.next()) {
+				resultObject = getSingleObject(cls, resultSet, metaData, cols_len);
+				break;
+			}
+			return resultObject;
+		} finally {
+			releaseResultSet(resultSet);
 		}
-		releaseResources(connection, resultSet, pstmt);
-		return resultObject;
 	}
 	/**
 	 * 通过反射查找多个记录
@@ -185,18 +243,20 @@ public class JdbcUtils {
 	 * @throws Exception
 	 */
 	public static <T> List<T> findMoreResultByObject(String sql, List<Object> params, Class<T> cls) throws Exception {
-		Connection connection = getConnection();
-		PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
-		ResultSet resultSet = pstmt.executeQuery();
-		resultSet = pstmt.executeQuery();
-		List<T> list = new ArrayList<>();
-		ResultSetMetaData metaData = resultSet.getMetaData();
-		int cols_len = metaData.getColumnCount();
-		while (resultSet.next()) {
-			list.add(getSingleObject(cls, resultSet, metaData, cols_len));
+		ResultSet resultSet = null;
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection)) {
+			resultSet = pstmt.executeQuery();
+			List<T> list = new ArrayList<>();
+			ResultSetMetaData metaData = resultSet.getMetaData();
+			int cols_len = metaData.getColumnCount();
+			while (resultSet.next()) {
+				list.add(getSingleObject(cls, resultSet, metaData, cols_len));
+			}
+			return list;
+		} finally {
+			releaseResultSet(resultSet);
 		}
-		releaseResources(connection, resultSet, pstmt);
-		return list;
 	}
 	/**
 	 * 通过反射更新记录
@@ -216,15 +276,14 @@ public class JdbcUtils {
 		Field[] fileds = cls.getDeclaredFields();
 		Field primaryField = cls.getField(primaryKeyName);
 		String sql = createObjectUpdateSql(primaryKeyName, cls, fileds);
-		Connection connection = getConnection();
-		PreparedStatement pstmt = connection.prepareStatement(sql);
-		for (int i = 0; i < fileds.length; i++) {
-			pstmt.setObject(i + 1, fileds[i].get(object));
+		try (Connection connection = getConnection(); PreparedStatement pstmt = connection.prepareStatement(sql)) {
+			for (int i = 0; i < fileds.length; i++) {
+				pstmt.setObject(i + 1, fileds[i].get(object));
+			}
+			pstmt.setObject(fileds.length + 1, primaryField.get(object));
+			int resultCount = pstmt.executeUpdate();
+			return resultCount > 0 ? true : false;
 		}
-		pstmt.setObject(fileds.length + 1, primaryField.get(object));
-		int resultCount = pstmt.executeUpdate();
-		releaseResources(connection, null, pstmt);
-		return resultCount > 0 ? true : false;
 	}
 	/**
 	 * 通过反射插入记录
@@ -240,14 +299,13 @@ public class JdbcUtils {
 		Class<T> cls = (Class<T>) object.getClass();
 		Field[] fileds = cls.getDeclaredFields();
 		String sql = createObjectInsertSql(object, fileds);
-		Connection connection = getConnection();
-		PreparedStatement pstmt = connection.prepareStatement(sql);
-		for (int i = 0; i < fileds.length; i++) {
-			pstmt.setObject(i + 1, fileds[i].get(object));
+		try (Connection connection = getConnection(); PreparedStatement pstmt = connection.prepareStatement(sql)) {
+			for (int i = 0; i < fileds.length; i++) {
+				pstmt.setObject(i + 1, fileds[i].get(object));
+			}
+			int resultCount = pstmt.executeUpdate();
+			return resultCount > 0 ? true : false;
 		}
-		int resultCount = pstmt.executeUpdate();
-		releaseResources(connection, null, pstmt);
-		return resultCount > 0 ? true : false;
 	}
 	/**
 	 * 通过自定义datatable查找记录
@@ -257,39 +315,91 @@ public class JdbcUtils {
 	 * @throws SQLException
 	 */
 	public static DataTable findResultByDataTable(String sql, List<Object> params) throws SQLException {
-		Connection connection = getConnection();
-		PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
-		ResultSet resultSet = pstmt.executeQuery();
-		ResultSetMetaData metaData = resultSet.getMetaData();
-		DataTable dataTable = new DataTable(metaData.getColumnLabel(1));
-		int cols_len = metaData.getColumnCount();
-		getColumns(metaData, dataTable, cols_len);
-		while (resultSet.next()) {
-			getDataRow(resultSet, metaData, dataTable, cols_len);
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection);
+				ResultSet resultSet = pstmt.executeQuery()) {
+			ResultSetMetaData metaData = resultSet.getMetaData();
+			DataTable dataTable = new DataTable(metaData.getColumnLabel(1));
+			int cols_len = metaData.getColumnCount();
+			getColumns(metaData, dataTable, cols_len);
+			while (resultSet.next()) {
+				getDataRow(resultSet, metaData, dataTable, cols_len);
+			}
+			return dataTable;
 		}
-		releaseResources(connection, resultSet, pstmt);
-		return dataTable;
 	}
-	/*****************************私有方法*******************************/
+	
 	/**
-	 * 获取连接对象
+	 * 判断数据库是否存在表
+	 * @param tableName
+	 * @return
+	 * @throws SQLException
+	 */
+	public static boolean tableExist(String tableName) throws SQLException{
+		try (Connection connection = getConnection();
+				ResultSet resultSet = connection.getMetaData().getTables(null, null, tableName, null)) {
+			return resultSet.next();
+		}
+	}
+	
+	/**
+	 * 判断数据库是否支持批处理 
+	 * @param con
+	 * @return
+	 */
+    public static boolean supportBatch(Connection connection) {
+		try {
+			// 得到数据库的元数据
+			DatabaseMetaData md = connection.getMetaData();
+			return md.supportsBatchUpdates();
+		} catch (SQLException e) {
+			e.printStackTrace();
+			return false;
+		}
+    }
+	
+	/**
+	 * 执行批处理
+	 * @param sqls
+	 * @return
+	 * @throws SQLException
+	 */
+	public static int[] executeBatch(List<String> sqls) throws SQLException{
+		try (Connection connection = getConnection(); Statement statement = connection.createStatement()) {
+			for (String sql : sqls) {
+				statement.addBatch(sql);
+			}
+			// 一次执行多条SQL语句
+			int[] count = statement.executeBatch();
+			return count;
+		}
+	}
+	
+	/**
+	 * 执行带参数的sql语句
+	 * @param sql
+	 * @param params
+	 * @return
+	 * @throws SQLException
+	 */
+	public static boolean executeSQL(String sql, List<Object> params) throws SQLException {
+		try (Connection connection = getConnection();
+				PreparedStatement pstmt = createNormalPreparedStatement(sql, params, connection)) {
+			return pstmt.execute();
+		}
+	}
+	/**
+	 * 执行不带参数的sql语句
+	 * @param sql
 	 * @return
 	 * @throws SQLException 
 	 */
-	public static Connection getConnection() throws SQLException {
-		return DriverManager.getConnection(URL, USERNAME, PASSWORD);
+	public static boolean executeSQL(String sql) throws SQLException{
+		try (Connection connection = getConnection(); Statement statement = connection.createStatement()) {
+			return statement.execute(sql);
+		}
 	}
-	/**
-	 *  释放相关资源：数据库连接、数据集和处理对象
-	 * @param connection
-	 * @param resultSet
-	 * @param pstmt
-	 */
-	private static void releaseResources(Connection connection, ResultSet resultSet, PreparedStatement pstmt) {
-		releaseConnection(connection);
-		releasePrepardStatement(pstmt);
-		releaseResultSet(resultSet);
-	}
+	/*************************************私有方法*****************************************/
    /**
     * 释放连接
     * @param connection
@@ -320,7 +430,7 @@ public class JdbcUtils {
    * 释放PreparedStatement
    * @param pstmt
    */
-	private static void releasePrepardStatement(PreparedStatement pstmt) {
+	private static void releaseStatement(PreparedStatement pstmt) {
 		try {
 			if (pstmt != null && !pstmt.isClosed()) {
 				pstmt.close();
@@ -404,47 +514,33 @@ public class JdbcUtils {
 		return pstmt;
 	}
 	/**
-	 * 根据keys创建insert sql语句
+	 * 根据filedNames创建插入sql
 	 * @param tableName
-	 * @param keys
+	 * @param filedNames
 	 * @return
 	 */
-	private static String createMapInsertSql(String tableName, Object[] keys) {
-		StringBuilder builder = new StringBuilder();
-		builder.append("insert  into " + tableName + " ( ");
-		StringBuilder valueBuilder = new StringBuilder("(");
-		for (int i = 0; i < keys.length; i++) {
-			if (i != keys.length - 1) {
-				builder.append(keys[i] + ",");
-				valueBuilder.append("?,");
-			} else {
-				builder.append(keys[i] + ") values ");
-				valueBuilder.append("?)");
-			}
-		}
-		builder.append(valueBuilder);
-		String sql = builder.toString();
-		return sql;
+	private static String createInsertSqlByMap(String tableName, Set<String> filedNames) {
+		StringBuilder builder = new StringBuilder("insert  into " + tableName);
+		// 使用lambda表达式拼接:(字段名1，字段名2)
+		builder.append(filedNames.stream().collect(Collectors.joining(",", " ( ", " ) values")));
+		// 使用lambda表达式拼接:(?，?)
+		builder.append(filedNames.stream().map(p -> "?").collect(Collectors.joining(",", "(", ")")));
+		return builder.toString();
 	}
 	/**
-	 * 根据tablename、主键字段名和keys创建修改 sql
+	 * 根据tablename、主键字段名和filedNames创建修改sql
 	 * @param tableName
 	 * @param primaryKey
 	 * @param keys
 	 * @return
 	 */
-	private static String createMapUpdateSql(String tableName, String primaryKey, Object[] keys) {
+	private static String createUpdateSqlByMap(String tableName, String pkName, Set<String> fieldNames) {
 		StringBuilder builder = new StringBuilder();
-		builder.append("update  " + tableName + " set ");
-		for (int i = 0; i < keys.length; i++) {
-			builder.append(keys[i] + "=?");
-			if (i != keys.length - 1) {
-				builder.append(",");
-			}
-		}
-		builder.append(" where " + primaryKey + "=?");
-		String sql = builder.toString();
-		return sql;
+		builder.append("update  " + tableName + " set  ");
+		// 使用lambda表达式拼接：字段名=？
+		builder.append(fieldNames.stream().collect(Collectors.joining("=?,", " ", "=?")));
+		builder.append(" where " + pkName + "=?");
+		return builder.toString();
 	}
 	/**
 	 * 创建删除sql
