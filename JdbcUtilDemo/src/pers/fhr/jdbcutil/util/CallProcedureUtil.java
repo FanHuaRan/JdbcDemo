@@ -161,6 +161,7 @@ public class CallProcedureUtil {
 	}
 	/**
 	 * 带返回参数、输入输出参数、结果集的存储过程调用
+	 * 如果不返回结果集，直接返回null
 	 * 必须先获取结果集 然后获取相关参数！！！
 	 * @param connection
 	 * @param procedureName
@@ -202,6 +203,7 @@ public class CallProcedureUtil {
 		return resultLists;
 		}
 	}
+	
 	/**
 	 * 从CallableStatement中获取存储的多个数据集
 	 * @param callableStatement
@@ -210,17 +212,21 @@ public class CallProcedureUtil {
 	 */
 	private List<List<Map<String, Object>>> getProcdureResults(CallableStatement callableStatement)
 			throws SQLException {
-		List<List<Map<String, Object>>> resultLists = new ArrayList<>();
-		try (ResultSet resultSet = callableStatement.executeQuery()) {
-			List<Map<String, Object>> list = getListFromResultSet(resultSet);
-			resultLists.add(list);
-		}
-		while (callableStatement.getMoreResults()) {
-			try (ResultSet moreResultSet = callableStatement.getResultSet()) {
-				resultLists.add(getListFromResultSet(moreResultSet));
+		if(callableStatement.execute()){
+			List<List<Map<String, Object>>> resultLists = new ArrayList<>();
+			try (ResultSet resultSet = callableStatement.executeQuery()) {
+				List<Map<String, Object>> list = getListFromResultSet(resultSet);
+				resultLists.add(list);
 			}
+			while (callableStatement.getMoreResults()) {
+				try (ResultSet moreResultSet = callableStatement.getResultSet()) {
+					resultLists.add(getListFromResultSet(moreResultSet));
+				}
+			}
+			return resultLists;
+		} else {
+			return null;
 		}
-		return resultLists;
 	}
 	/**
 	 * 从resultSet中获取List<Map<String, Object>>
