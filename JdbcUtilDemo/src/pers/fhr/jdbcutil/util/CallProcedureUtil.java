@@ -69,7 +69,7 @@ public class CallProcedureUtil {
 	}
 	
 	/**
-	 * 只含有结果集的存储过程调用
+	 * 只含有结果集的存储过程调用,不返回结果集就返回Null
 	 * @param connection
 	 * @param procedureName
 	 * @param returnParam
@@ -205,16 +205,28 @@ public class CallProcedureUtil {
 	}
 	
 	/**
-	 * 从CallableStatement中获取存储的多个数据集
+	 * 从CallableStatement中获取存储的多个数据集，不返回结果集就返回Null
 	 * @param callableStatement
 	 * @return
 	 * @throws SQLException
 	 */
 	private List<List<Map<String, Object>>> getProcdureResults(CallableStatement callableStatement)
 			throws SQLException {
-		if(callableStatement.execute()){
+		// //旧版本数据集获取方法，有bug，就是当没有数据集返回会爆出没有返回结果集的错误
+		// List<List<Map<String, Object>>> resultLists = new ArrayList<>();
+		// try (ResultSet resultSet = callableStatement.executeQuery()) {
+		// List<Map<String, Object>> list = getListFromResultSet(resultSet);
+		// resultLists.add(list);
+		// }
+		// while (callableStatement.getMoreResults()) {
+		// try (ResultSet moreResultSet = callableStatement.getResultSet()) {
+		// resultLists.add(getListFromResultSet(moreResultSet));
+		// }
+		// }
+		// return resultLists;
+		if (callableStatement.execute()) {
 			List<List<Map<String, Object>>> resultLists = new ArrayList<>();
-			try (ResultSet resultSet = callableStatement.executeQuery()) {
+			try (ResultSet resultSet = callableStatement.getResultSet()) {
 				List<Map<String, Object>> list = getListFromResultSet(resultSet);
 				resultLists.add(list);
 			}
